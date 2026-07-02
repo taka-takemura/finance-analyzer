@@ -43,11 +43,10 @@ def fetch_price(code: str) -> tuple[dict | None, list[str]]:
         except requests.RequestException as e:
             log.append(f"Yahoo({host}): {type(e).__name__}")
 
-    # --- 2) Stooq CSV ({code}.jp)
+    # --- 2) Stooq 現在値CSV (「h」は値なしフラグのため生クエリで送る)
     try:
         r = requests.get(
-            "https://stooq.com/q/l/",
-            params={"s": f"{code}.jp", "f": "sd2t2ohlcv", "h": "", "e": "csv"},
+            f"https://stooq.com/q/l/?s={code}.jp&f=sd2t2ohlcv&h&e=csv",
             headers=HEADERS, timeout=10)
         if r.ok and "," in r.text and "N/D" not in r.text:
             df = pd.read_csv(io.StringIO(r.text))
@@ -55,9 +54,25 @@ def fetch_price(code: str) -> tuple[dict | None, list[str]]:
                 c = pd.to_numeric(df.iloc[0]["Close"], errors="coerce")
                 if pd.notna(c) and c > 0:
                     return {"price": float(c), "source": "Stooq", "name": ""}, log
-        log.append(f"Stooq: HTTP {r.status_code}, 応答: {r.text[:60]!r}")
+        log.append(f"Stooq(現在値): HTTP {r.status_code}, 応答: {r.text[:60]!r}")
     except requests.RequestException as e:
-        log.append(f"Stooq: {type(e).__name__}")
+        log.append(f"Stooq(現在値): {type(e).__name__}")
+
+    # --- 3) Stooq 日次履歴CSV (最終行の終値)
+    try:
+        r = requests.get(f"https://stooq.com/q/d/l/?s={code}.jp&i=d",
+                         headers=HEADERS, timeout=15)
+        if r.ok and r.text.startswith("Date,"):
+            df = pd.read_csv(io.StringIO(r.text))
+            if len(df) and "Close" in df.columns:
+                c = pd.to_numeric(df.iloc[-1]["Close"], errors="coerce")
+                if pd.notna(c) and c > 0:
+                    return {"price": float(c),
+                            "source": f"Stooq (終値 {df.iloc[-1]['Date']})",
+                            "name": ""}, log
+        log.append(f"Stooq(履歴): HTTP {r.status_code}, 応答: {r.text[:60]!r}")
+    except requests.RequestException as e:
+        log.append(f"Stooq(履歴): {type(e).__name__}")
 
     return None, log
 
