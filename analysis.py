@@ -158,6 +158,32 @@ def estimate_variable_ratio(pl: pd.DataFrame) -> float:
     return float(np.clip(vr, 0.05, 0.95))
 
 
+def regression_cvp(pl: pd.DataFrame) -> dict | None:
+    """散布図法: 営業利益 = 限界利益率 × 売上高 − 固定費 を最小二乗で推定。
+
+    バフェットコード等で用いられる方式。データ3期以上が必要。
+    """
+    sales = _g(pl, "売上高")
+    op = _g(pl, "営業利益")
+    valid = sales.notna() & op.notna()
+    s, o = sales[valid].values.astype(float), op[valid].values.astype(float)
+    if len(s) < 3 or np.std(s) == 0:
+        return None
+    m, b = np.polyfit(s, o, 1)
+    pred = m * s + b
+    ss_res = float(((o - pred) ** 2).sum())
+    ss_tot = float(((o - o.mean()) ** 2).sum())
+    r2 = 1 - ss_res / ss_tot if ss_tot else float("nan")
+    return {
+        "限界利益率(%)": m * 100,
+        "固定費": -b,          # 切片の符号反転 = 通期固定費
+        "R2": r2,
+        "変動費率": 1 - m,
+        "点": list(zip(list(sales[valid].index), s, o)),
+        "傾き": m, "切片": b,
+    }
+
+
 def cvp(pl: pd.DataFrame, year: str, variable_ratio: float) -> dict:
     """指定年度のCVP分析。"""
     sales = float(pl.loc["売上高", year])

@@ -468,8 +468,65 @@ with tabs[4]:
     st.subheader("CVP分析 (損益分岐点)")
     y = st.select_slider("年度", years, value=latest, key="cvp_year")
     est_vr = an.estimate_variable_ratio(pl)
-    st.caption(f"高低点法による変動費率の推定値: {est_vr * 100:.1f}% (スライダーで調整可)")
-    vr = st.slider("変動費率 (%)", 5.0, 95.0, round(est_vr * 100, 1), 0.5) / 100
+    reg = an.regression_cvp(pl)
+
+    method = st.radio("変動費率の推定方法",
+                      ["散布図法 (回帰)", "高低点法", "手動"], horizontal=True,
+                      help="散布図法: 各期の売上高と営業利益を回帰 (バフェットコード方式)。"
+                           "高低点法: 売上最大期と最小期の2点から推定。")
+    if method == "散布図法 (回帰)":
+        if reg is None:
+            st.warning("散布図法には3期以上のデータが必要です。高低点法を使用します。")
+            vr = est_vr
+        elif not (0 < reg["変動費率"] < 1) or reg["固定費"] <= 0:
+            st.warning(f"回帰結果が経済的に不安定です (限界利益率 {reg['限界利益率(%)']:.1f}%、"
+                       f"固定費 {reg['固定費']:,.0f}{unit_label})。事業構造が期間中に変化して"
+                       "いる可能性があります。分析対象期間を狭めるか、高低点法/手動をご利用"
+                       "ください。ここでは高低点法の値を使用します。")
+            vr = est_vr
+        else:
+            vr = reg["変動費率"]
+            note = " ⚠️ R²が低く、費用構造が期間中に変化している可能性があります。" \
+                if reg["R2"] < 0.7 else ""
+            st.caption(f"限界利益率 {reg['限界利益率(%)']:.2f}% / "
+                       f"通期固定費 {reg['固定費']:,.0f}{unit_label} / "
+                       f"R² = {reg['R2']:.2f} (対象: {years[0]}〜{years[-1]}){note}")
+    elif method == "高低点法":
+        vr = est_vr
+        st.caption(f"高低点法による変動費率: {est_vr * 100:.1f}%")
+    else:
+        vr = st.slider("変動費率 (%)", 5.0, 95.0, round(est_vr * 100, 1), 0.5) / 100
+
+    # --- 散布図法の回帰チャート
+    if reg is not None:
+        with st.expander("📉 散布図法の回帰チャート (売上高 × 営業利益)",
+                         expanded=(method == "散布図法 (回帰)")):
+            labels, xs_pt, ys_pt = zip(*reg["点"])
+            x_max = max(xs_pt) * 1.15
+            line_x = np.array([0, x_max])
+            line_y = reg["傾き"] * line_x + reg["切片"]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=list(xs_pt), y=list(ys_pt), mode="markers", name="実績 (各期)",
+                marker=dict(size=10, color=COLORS["blue"]),
+                text=list(labels),
+                hovertemplate="%{text}<br>売上高 %{x:,.0f}<br>営業利益 %{y:,.0f}<extra></extra>"))
+            fig.add_trace(go.Scatter(
+                x=line_x, y=line_y, mode="lines", name="回帰直線",
+                line=dict(color=COLORS["blue"], width=2)))
+            fig.add_annotation(
+                xref="paper", yref="paper", x=0.99, y=0.98, showarrow=False,
+                align="right",
+                text=(f"限界利益率 = {reg['限界利益率(%)']:.3f}%<br>"
+                      f"通期固定費 = {reg['固定費']:,.0f}{unit_label}<br>"
+                      f"R² = {reg['R2']:.2f}"))
+            fig.update_layout(height=420,
+                              xaxis_title=f"売上高 ({unit_label})",
+                              yaxis_title=f"営業利益 ({unit_label})",
+                              legend=dict(orientation="h", y=-0.25),
+                              margin=dict(t=30))
+            st.plotly_chart(fig, width="stretch")
+
     c = an.cvp(pl, y, vr)
 
     c1, c2, c3, c4 = st.columns(4)
