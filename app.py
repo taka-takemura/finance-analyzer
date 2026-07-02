@@ -141,8 +141,131 @@ years = list(pl.columns)
 latest = years[-1]
 ratios = an.compute_ratios(pl, bs, cf, tax_rate)
 
-tabs = st.tabs(["📈 概要", "📋 財務指標", "🌳 DuPont分析", "🌲 ROICツリー",
-                "⚖️ CVP分析", "🎛 シミュレーション"])
+dash_tab, *tabs = st.tabs(["🏠 ダッシュボード", "📈 概要", "📋 財務指標", "🌳 DuPont分析",
+                           "🌲 ROICツリー", "⚖️ CVP分析", "🎛 シミュレーション"])
+
+
+# ================================================================ ダッシュボード
+def fmt_jpy(v: float) -> str:
+    """百万円単位の値を 兆/億 表記に変換 (単位表示が百万円のときのみ)。"""
+    if not np.isfinite(v):
+        return "―"
+    if unit_label == "百万円":
+        if abs(v) >= 1_000_000:
+            return f"{v / 1_000_000:,.2f}兆円"
+        if abs(v) >= 10_000:
+            return f"{v / 10_000:,.0f}億円"
+        return f"{v:,.0f}百万円"
+    return f"{v:,.0f}{unit_label}"
+
+
+def dash_card(col, title: str, series: pd.Series, kind: str = "money", key: str = ""):
+    """バフェットコード風の指標カード (値+前年差+年次ミニチャート)。"""
+    s = series.dropna() if isinstance(series, pd.Series) else pd.Series(dtype=float)
+    with col.container(border=True):
+        st.markdown(f"<div style='font-size:0.78rem;color:#6B7280'>{title}</div>",
+                    unsafe_allow_html=True)
+        if s.empty:
+            st.markdown("―")
+            return
+        v = float(s.iloc[-1])
+        txt = {"money": fmt_jpy(v), "pct": f"{v:,.1f}%", "times": f"{v:,.2f}倍",
+               "turn": f"{v:,.2f}回", "days": f"{v:,.1f}日",
+               "yen": f"{v:,.1f}円"}.get(kind, f"{v:,.1f}")
+        delta_html = ""
+        if len(s) >= 2 and np.isfinite(s.iloc[-2]) and s.iloc[-2] != 0:
+            if kind in ("money", "yen"):
+                d = (v - s.iloc[-2]) / abs(s.iloc[-2]) * 100
+                dtxt = f"{d:+.1f}%"
+            else:
+                d = v - s.iloc[-2]
+                dtxt = f"{d:+.2f}pt" if kind == "pct" else f"{d:+.2f}"
+            c = "#059669" if d >= 0 else "#DC2626"
+            delta_html = (f"<span style='font-size:0.75rem;color:{c};"
+                          f"margin-left:6px'>{dtxt}</span>")
+        st.markdown(f"<div><span style='font-size:1.4rem;font-weight:700;"
+                    f"color:#1E3A8A'>{txt}</span>{delta_html}</div>",
+                    unsafe_allow_html=True)
+        if len(s) >= 2:
+            colors = ["#BFDBFE"] * (len(s) - 1) + ["#2563EB"]
+            fig = go.Figure(go.Bar(x=[str(i) for i in s.index], y=s.values,
+                                   marker_color=colors))
+            fig.update_layout(height=64, margin=dict(l=0, r=0, t=4, b=0),
+                              showlegend=False, xaxis=dict(visible=False),
+                              yaxis=dict(visible=False),
+                              paper_bgcolor="rgba(0,0,0,0)",
+                              plot_bgcolor="rgba(0,0,0,0)")
+            st.plotly_chart(fig, width="stretch", key=f"spark_{key}",
+                            config={"displayModeBar": False, "staticPlot": True})
+
+
+with dash_tab:
+    import valuation
+
+    debt_s = (bs.loc["短期借入金"] if "短期借入金" in bs.index else 0) + \
+             (bs.loc["長期借入金"] if "長期借入金" in bs.index else 0)
+    if not isinstance(debt_s, pd.Series):
+        debt_s = pd.Series(np.nan, index=years)
+    eq_s = an.equity_series(bs)
+
+    st.markdown("##### 業績")
+    cols = st.columns(4)
+    dash_card(cols[0], f"売上高 ({latest})", pl.loc["売上高"], "money", "sales")
+    dash_card(cols[1], "営業利益", pl.loc["営業利益"], "money", "op")
+    dash_card(cols[2], "当期純利益", pl.loc["当期純利益"], "money", "ni")
+    dash_card(cols[3], "営業利益率", ratios.loc[("収益性", "営業利益率(%)")], "pct", "opm")
+
+    st.markdown("##### 収益性・効率性")
+    cols = st.columns(4)
+    dash_card(cols[0], "ROE (自己資本ベース)", ratios.loc[("収益性", "ROE(%)")], "pct", "roe")
+    dash_card(cols[1], "ROA", ratios.loc[("収益性", "ROA(%)")], "pct", "roa")
+    dash_card(cols[2], "ROIC", ratios.loc[("収益性", "ROIC(%)")], "pct", "roic")
+    dash_card(cols[3], "CCC", ratios.loc[("効率性", "CCC(日)")], "days", "ccc")
+
+    st.markdown("##### 財務・キャッシュフロー")
+    cols = st.columns(4)
+    dash_card(cols[0], "総資産", bs.loc["資産合計"], "money", "assets")
+    dash_card(cols[1], "自己資本比率", ratios.loc[("安全性", "自己資本比率(%)")], "pct", "eqr")
+    dash_card(cols[2], "有利子負債", debt_s, "money", "debt")
+    if not cf.empty and ("CF", "フリーCF") in ratios.index:
+        dash_card(cols[3], "フリーCF", ratios.loc[("CF", "フリーCF")], "money", "fcf")
+    else:
+        dash_card(cols[3], "D/Eレシオ", ratios.loc[("安全性", "D/Eレシオ(倍)")], "times", "de")
+
+    # ---------------- バリュエーション
+    st.markdown("##### バリュエーション")
+    with st.expander("💹 株価・株式数の設定", expanded="price" not in st.session_state):
+        c1, c2, c3, c4 = st.columns(4)
+        code_in = c1.text_input("証券コード (4桁)", st.session_state.get("val_code", ""))
+        if c1.button("株価を自動取得", disabled=not code_in):
+            q = valuation.fetch_price(code_in)
+            if q:
+                st.session_state["price"] = q["price"]
+                st.session_state["val_code"] = code_in
+                st.success(f"{q['price']:,.1f}円 ({q['source']})")
+            else:
+                st.error("自動取得できませんでした。株価を手入力してください。")
+        price = c2.number_input("株価 (円)", 0.0,
+                                value=float(st.session_state.get("price", 0.0)), step=1.0)
+        shares = c3.number_input("発行済株式数 (百万株)", 0.0, step=1.0,
+                                 help="自己株式控除後が望ましい")
+        dps = c4.number_input("1株配当 (円/年)", 0.0, step=1.0)
+        st.caption("財務データの単位が百万円であることを前提に計算します。")
+
+    if price > 0 and shares > 0:
+        ni_latest = float(pl.loc["当期純利益", latest])
+        eq_latest = float(eq_s[latest])
+        val = valuation.compute(price, shares, dps, ni_latest, eq_latest)
+        cols = st.columns(6)
+        specs = [("時価総額", "時価総額(百万円)", "money"),
+                 ("PER", "PER(倍)", "times"), ("PBR", "PBR(倍)", "times"),
+                 ("EPS", "EPS(円)", "yen"), ("BPS", "BPS(円)", "yen"),
+                 ("配当利回り", "配当利回り(%)", "pct")]
+        for col, (label, k, kind) in zip(cols, specs):
+            dash_card(col, label, pd.Series([val[k]], index=[latest]), kind,
+                      f"val_{k}")
+    else:
+        st.info("株価と発行済株式数を入力すると、時価総額・PER・PBR・EPS・BPS・配当利回りを表示します。")
 
 # ================================================================ 概要
 with tabs[0]:
