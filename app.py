@@ -235,18 +235,22 @@ with dash_tab:
     # ---------------- バリュエーション
     st.markdown("##### バリュエーション")
     with st.expander("💹 株価・株式数の設定", expanded="price" not in st.session_state):
+        st.session_state.setdefault("price", 0.0)
         c1, c2, c3, c4 = st.columns(4)
         code_in = c1.text_input("証券コード (4桁)", st.session_state.get("val_code", ""))
         if c1.button("株価を自動取得", disabled=not code_in):
-            q = valuation.fetch_price(code_in)
+            q, fetch_log = valuation.fetch_price(code_in)
             if q:
                 st.session_state["price"] = q["price"]
                 st.session_state["val_code"] = code_in
                 st.success(f"{q['price']:,.1f}円 ({q['source']})")
             else:
                 st.error("自動取得できませんでした。株価を手入力してください。")
-        price = c2.number_input("株価 (円)", 0.0,
-                                value=float(st.session_state.get("price", 0.0)), step=1.0)
+                for line in fetch_log:
+                    st.caption(f"・{line}")
+                st.caption("※ Streamlit Cloud等のクラウド環境ではYahooにブロックされる"
+                           "ことがあります。ローカル実行では成功する場合があります。")
+        price = c2.number_input("株価 (円)", 0.0, step=1.0, key="price")
         shares = c3.number_input("発行済株式数 (百万株)", 0.0, step=1.0,
                                  help="自己株式控除後が望ましい")
         dps = c4.number_input("1株配当 (円/年)", 0.0, step=1.0)
