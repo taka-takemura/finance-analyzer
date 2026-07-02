@@ -80,8 +80,11 @@ ELEMENT_MAP = {
     "負債合計": ("BS", ["jppfs_cor:Liabilities", "jpigp_cor:TotalLiabilitiesIFRS",
                          "jpigp_cor:LiabilitiesIFRS"]),
     "純資産合計": ("BS", ["jppfs_cor:NetAssets", "jpigp_cor:TotalEquityIFRS",
-                           "jpigp_cor:EquityIFRS",
-                           "jpigp_cor:EquityAttributableToOwnersOfParentIFRS"]),
+                           "jpigp_cor:EquityIFRS"]),
+    "自己資本": ("BS", ["jpigp_cor:EquityAttributableToOwnersOfParentIFRS"]),
+    "非支配株主持分": ("BS", ["jppfs_cor:NonControllingInterests",
+                               "jppfs_cor:MinorityInterests",
+                               "jpigp_cor:NonControllingInterestsIFRS"]),
     # ---------------- CF (Duration)
     "営業活動によるキャッシュ・フロー": ("CF", [
         "jppfs_cor:NetCashProvidedByUsedInOperatingActivities",

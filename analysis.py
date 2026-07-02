@@ -22,16 +22,28 @@ def _div(a, b):
         (np.nan if not np.isfinite(r) else r)
 
 
+def equity_series(bs: pd.DataFrame) -> pd.Series:
+    """自己資本(親会社株主帰属)。無い年度は純資産合計で補完。
+
+    ROE・DuPont等の分子が親会社帰属利益のため、分母もこれに揃える。
+    """
+    net = _g(bs, "純資産合計")
+    if "自己資本" in bs.index:
+        return bs.loc["自己資本"].astype(float).combine_first(net)
+    return net
+
+
 # ================================================================ 財務指標
 def compute_ratios(pl: pd.DataFrame, bs: pd.DataFrame, cf: pd.DataFrame,
                    tax_rate: float = 0.30) -> pd.DataFrame:
     """カテゴリ別の財務指標を年度ごとに計算する。"""
     sales = _g(pl, "売上高")
     debt = _g(bs, "短期借入金") + _g(bs, "長期借入金")
-    equity = _g(bs, "純資産合計")
+    equity = equity_series(bs)           # 自己資本(親会社帰属)ベース
+    net_assets = _g(bs, "純資産合計")     # 少数株主持分込み
     assets = _g(bs, "資産合計")
     nopat = _g(pl, "営業利益") * (1 - tax_rate)
-    invested = equity + debt
+    invested = net_assets + debt         # 投下資本は純資産全体+有利子負債
 
     r = {}
     # --- 収益性
@@ -77,11 +89,14 @@ def compute_ratios(pl: pd.DataFrame, bs: pd.DataFrame, cf: pd.DataFrame,
 
 # ================================================================ DuPont
 def dupont(pl: pd.DataFrame, bs: pd.DataFrame) -> pd.DataFrame:
-    """ROE = 純利益率 × 総資産回転率 × 財務レバレッジ"""
+    """ROE = 純利益率 × 総資産回転率 × 財務レバレッジ
+
+    分子(親会社株主帰属利益)に合わせ、分母も自己資本(親会社帰属)を使う。
+    """
     sales = _g(pl, "売上高")
     ni = _g(pl, "当期純利益")
     assets = _g(bs, "資産合計")
-    equity = _g(bs, "純資産合計")
+    equity = equity_series(bs)
     return pd.DataFrame({
         "当期純利益率(%)": _div(ni, sales) * 100,
         "総資産回転率(回)": _div(sales, assets),
@@ -101,8 +116,8 @@ def roic_tree(pl: pd.DataFrame, bs: pd.DataFrame, year: str,
     op = v(pl, "営業利益")
     nopat = op * (1 - tax_rate)
     debt = v(bs, "短期借入金") + v(bs, "長期借入金")
-    equity = v(bs, "純資産合計")
-    invested = equity + debt
+    net_assets = v(bs, "純資産合計")  # 投下資本は少数株主持分込みの純資産で計算
+    invested = net_assets + debt
     wc = v(bs, "売上債権") + v(bs, "棚卸資産") - v(bs, "仕入債務")
     fixed = v(bs, "固定資産合計")
 
@@ -124,7 +139,7 @@ def roic_tree(pl: pd.DataFrame, bs: pd.DataFrame, year: str,
         "固定資産": fixed,
         "固定資産回転率(回)": sales / fixed if fixed else float("nan"),
         "有利子負債": debt,
-        "自己資本": equity,
+        "純資産": net_assets,
         "実効税率(%)": tax_rate * 100,
     }
 
@@ -195,7 +210,9 @@ def simulate(pl: pd.DataFrame, bs: pd.DataFrame, year: str,
     noi0 = v(pl, "営業外収益")
     noe0 = v(pl, "営業外費用")
     debt0 = v(bs, "短期借入金") + v(bs, "長期借入金")
-    equity0 = v(bs, "純資産合計")
+    net0 = v(bs, "純資産合計")            # ROIC用 (少数株主込み)
+    eqs = equity_series(bs)
+    equity0 = float(eqs[year]) if year in eqs.index and np.isfinite(eqs[year]) else net0  # ROE用
     assets0 = v(bs, "資産合計")
     recv0 = v(bs, "売上債権")
     inv0 = v(bs, "棚卸資産")
@@ -217,13 +234,13 @@ def simulate(pl: pd.DataFrame, bs: pd.DataFrame, year: str,
     inv1 = (inv0 / sales0 * 365 + p["inventory_days_chg"]) / 365 * sales1 if sales0 else inv0
     # 資産合計は運転資本と負債の増減を反映
     assets1 = assets0 + (recv1 - recv0) + (inv1 - inv0) + (debt1 - debt0)
-    invested1 = equity0 + debt1
+    invested1 = net0 + debt1
     nopat1 = op1 * (1 - tax_rate)
 
     op0 = sales0 - cogs0 - sga0
     ord0 = op0 + noi0 - noe0
     ni0 = ord0 * (1 - tax_rate)
-    invested0 = equity0 + debt0
+    invested0 = net0 + debt0
 
     def pct(a, b):
         return a / b * 100 if b else float("nan")

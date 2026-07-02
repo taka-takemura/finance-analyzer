@@ -257,7 +257,7 @@ with tabs[2]:
       S2 [label="売上高\\n{fmt(float(pl.loc['売上高', y]))}"];
       TA1 [label="総資産\\n{fmt(float(bs.loc['資産合計', y]))}"];
       TA2 [label="総資産\\n{fmt(float(bs.loc['資産合計', y]))}"];
-      EQ [label="自己資本\\n{fmt(float(bs.loc['純資産合計', y]))}"];
+      EQ [label="自己資本\\n{fmt(float(an.equity_series(bs)[y]))}"];
       NI -> NPM; S1 -> NPM; S2 -> AT; TA1 -> AT; TA2 -> LEV; EQ -> LEV;
     }}"""
     st.graphviz_chart(dot, width="stretch")
@@ -315,7 +315,7 @@ with tabs[3]:
       WC -> TURN; FA -> TURN;
       IC [label="投下資本\\n{fmt(t['投下資本'])}", fillcolor="#D1FAE5"];
       DEBT [label="有利子負債\\n{fmt(t['有利子負債'])}"];
-      EQ [label="自己資本\\n{fmt(t['自己資本'])}"];
+      EQ [label="純資産\\n(非支配持分含む)\\n{fmt(t['純資産'])}"];
       DEBT -> IC; EQ -> IC; IC -> TURN [style=dashed];
     }}"""
     st.graphviz_chart(dot, width="stretch")

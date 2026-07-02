@@ -78,8 +78,12 @@ BS_ALIASES = {
     "その他固定負債": ["othernoncurrentliabilities", "その他の固定負債", "その他非流動負債"],
     "固定負債合計": ["固定負債", "非流動負債合計", "非流動負債", "totalnoncurrentliabilities"],
     "負債合計": ["totalliabilities", "負債の部合計"],
-    "純資産合計": ["純資産", "自己資本", "株主資本合計", "totalequity", "netassets",
-                    "totalshareholdersequity", "資本合計", "親会社の所有者に帰属する持分"],
+    "純資産合計": ["純資産", "totalequity", "netassets", "資本合計", "負債純資産合計"],
+    "自己資本": ["株主資本等合計", "株主資本合計", "株主資本", "親会社の所有者に帰属する持分",
+                  "親会社株主に帰属する持分", "自己資本合計",
+                  "equityattributabletoownersofparent", "totalshareholdersequity",
+                  "shareholdersequity"],
+    "非支配株主持分": ["少数株主持分", "noncontrollinginterests", "minorityinterests"],
 }
 
 CF_ALIASES = {
@@ -300,6 +304,10 @@ def _fill_derived(stmts: dict) -> None:
         ensure(bs, "純資産合計",
                lambda: g("資産合計") - g("負債合計")
                if g("資産合計") is not None and g("負債合計") is not None else None)
+        # 自己資本(親会社帰属) = 純資産 − 非支配株主持分
+        ensure(bs, "自己資本",
+               lambda: g("純資産合計") - gz("非支配株主持分")
+               if g("純資産合計") is not None and "非支配株主持分" in bs.index else None)
 
 
 def validate(stmts: dict) -> list[str]:
