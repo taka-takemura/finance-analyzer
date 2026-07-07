@@ -85,7 +85,8 @@ import edinet
 
 st.sidebar.title("📊 財務分析ビジュアライザー")
 source = st.sidebar.radio("データソース",
-                          ["ファイルアップロード", "サンプルデータ", "EDINETから自動取得"])
+                          ["ファイルアップロード", "サンプルデータ", "EDINETから自動取得"],
+                          key="source")
 
 stmts = None
 if source == "ファイルアップロード":
@@ -193,9 +194,20 @@ if not info_df.empty:
     if not prod.empty:
         ratios = pd.concat([ratios, prod])
 
-dash_tab, *tabs = st.tabs(["🏠 ダッシュボード", "📈 概要", "📋 財務指標", "🌳 DuPont分析",
-                           "🌲 ROICツリー", "⚖️ CVP分析", "🎛 シミュレーション",
-                           "🆚 複数社比較", "💰 DCF評価", "📄 レポート"])
+# ナビゲーション: st.tabsは全タブをDOMに描画するため、ウィジェット操作の再実行で
+# 全タブが同時表示される既知の不具合がある。選択ページのみ描画する方式に変更。
+PAGES = ["🏠 ダッシュボード", "📈 概要", "📋 財務指標", "🌳 DuPont分析",
+         "🌲 ROICツリー", "⚖️ CVP分析", "🎛 シミュレーション",
+         "🆚 複数社比較", "💰 DCF評価", "📄 レポート"]
+try:
+    page = st.segmented_control("ページ", PAGES, default=PAGES[0],
+                                label_visibility="collapsed", key="nav")
+except (AttributeError, TypeError):  # 古いStreamlit向けフォールバック
+    page = st.radio("ページ", PAGES, horizontal=True,
+                    label_visibility="collapsed", key="nav")
+if page is None:
+    page = PAGES[0]
+st.markdown("---")
 
 
 # ================================================================ ダッシュボード
@@ -255,7 +267,7 @@ def dash_card(col, title: str, series: pd.Series, kind: str = "money", key: str 
                             config={"displayModeBar": False, "staticPlot": True})
 
 
-with dash_tab:
+if page == "🏠 ダッシュボード":
     import valuation
 
     debt_s = (bs.loc["短期借入金"] if "短期借入金" in bs.index else 0) + \
@@ -360,7 +372,7 @@ with dash_tab:
         st.info("株価と発行済株式数を入力すると、時価総額・PER・PBR・EPS・BPS・配当利回りを表示します。")
 
 # ================================================================ 概要
-with tabs[0]:
+if page == "📈 概要":
     prev = years[-2] if len(years) >= 2 else None
 
     def metric(col, label, item, df=pl, suffix=""):
@@ -437,7 +449,7 @@ with tabs[0]:
             st.plotly_chart(fig, width="stretch")
 
 # ================================================================ 財務指標
-with tabs[1]:
+if page == "📋 財務指標":
     st.subheader("財務指標一覧")
     st.dataframe(ratios.round(2), width="stretch", height=560)
 
@@ -450,7 +462,7 @@ with tabs[1]:
                         width="stretch")
 
 # ================================================================ DuPont
-with tabs[2]:
+if page == "🌳 DuPont分析":
     st.subheader("DuPont分析 — ROEの3分解")
     dp = an.dupont(pl, bs)
     y = st.select_slider("年度", years, value=latest, key="dp_year")
@@ -506,7 +518,7 @@ with tabs[2]:
         st.plotly_chart(fig, width="stretch")
 
 # ================================================================ ROICツリー
-with tabs[3]:
+if page == "🌲 ROICツリー":
     st.subheader("ROICツリー")
     y = st.select_slider("年度", years, value=latest, key="roic_year")
     t = an.roic_tree(pl, bs, y, tax_rate)
@@ -552,7 +564,7 @@ with tabs[3]:
                    else "資本コストを下回っています。収益性か資本効率の改善が必要です。"))
 
 # ================================================================ CVP
-with tabs[4]:
+if page == "⚖️ CVP分析":
     st.subheader("CVP分析 (損益分岐点)")
     y = st.select_slider("年度", years, value=latest, key="cvp_year")
     est_vr = an.estimate_variable_ratio(pl)
@@ -647,7 +659,7 @@ with tabs[4]:
                  width="stretch")
 
 # ================================================================ シミュレーション
-with tabs[5]:
+if page == "🎛 シミュレーション":
     st.subheader("感応度シミュレーション")
     y = st.select_slider("基準年度", years, value=latest, key="sim_year")
 
@@ -755,7 +767,7 @@ with tabs[5]:
     st.plotly_chart(fig, width="stretch")
 
 # ================================================================ 複数社比較
-with tabs[6]:
+if page == "🆚 複数社比較":
     st.subheader("複数社比較")
     cmp_files = st.file_uploader(
         "比較する会社の財務諸表を追加 (複数選択可)", type=["xlsx", "xls", "csv"],
@@ -836,7 +848,7 @@ with tabs[6]:
         st.caption("決算期が異なる会社は「最新期を0」とする相対軸で重ねています。")
 
 # ================================================================ DCF評価
-with tabs[7]:
+if page == "💰 DCF評価":
     st.subheader("DCF簡易企業価値評価")
     st.caption("FCFを予測してWACCで割り引く2段階モデル。教育・スクリーニング用の簡易版です。")
 
@@ -919,7 +931,7 @@ with tabs[7]:
                 st.dataframe(mat.round(0), width="stretch")
 
 # ================================================================ レポート
-with tabs[8]:
+if page == "📄 レポート":
     st.subheader("分析レポート出力")
     st.caption("チャートと指標表を1つのHTMLにまとめます。ブラウザで開き、印刷 (⌘P) から"
                "PDFとして保存できます。")
