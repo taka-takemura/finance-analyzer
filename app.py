@@ -197,7 +197,7 @@ if not info_df.empty:
 # ナビゲーション: st.tabsは全タブをDOMに描画するため、ウィジェット操作の再実行で
 # 全タブが同時表示される既知の不具合がある。選択ページのみ描画する方式に変更。
 PAGES = ["🏠 ダッシュボード", "📈 概要", "📋 財務指標", "🌳 DuPont分析",
-         "🌲 ROICツリー", "⚖️ CVP分析", "🎛 シミュレーション",
+         "🌲 ROICツリー", "⚖️ CVP分析", "🧩 セグメント", "🎛 シミュレーション",
          "🆚 複数社比較", "💰 DCF評価", "📄 レポート"]
 try:
     page = st.segmented_control("ページ", PAGES, default=PAGES[0],
@@ -659,6 +659,117 @@ if page == "⚖️ CVP分析":
                  width="stretch")
 
 # ================================================================ シミュレーション
+# ================================================================ セグメント
+if page == "🧩 セグメント":
+    import segments as sg
+
+    st.subheader("セグメント分析")
+    seg_files = st.file_uploader(
+        "SPEEDAのセグメントファイル (事業/地域、複数可)", type=["xlsx", "xls"],
+        accept_multiple_files=True, key="seg_files")
+
+    @st.cache_data(show_spinner=False)
+    def load_seg(data: bytes):
+        return sg.load_segments(io.BytesIO(data))
+
+    parsed = {}
+    for f in seg_files or []:
+        try:
+            p = load_seg(f.getvalue())
+            if p:
+                parsed[p["type"]] = p
+            else:
+                st.warning(f"{f.name}: セグメント形式として認識できませんでした")
+        except Exception as e:
+            st.warning(f"{f.name}: {e}")
+
+    if not parsed:
+        st.info("SPEEDAの「事業セグメント」または「地域セグメント」の"
+                "エクスポートをアップロードしてください。")
+    else:
+        seg = parsed[st.radio("セグメント種別", list(parsed), horizontal=True)] \
+            if len(parsed) > 1 else next(iter(parsed.values()))
+        sales_key = "外部顧客向け売上高" if "外部顧客向け売上高" in seg["items"] else "売上高"
+        all_sales = sg.active_segments(seg["items"][sales_key])
+        # データが存在する年度のみ対象 (地域セグメント等は開示廃止で近年が空のことがある)
+        data_years = [y for y in seg["years"] if all_sales[y].notna().any()]
+        if not data_years:
+            st.warning("このセグメント種別には数値データがありません。")
+            st.stop()
+        if data_years[-1] != seg["years"][-1]:
+            st.info(f"このセグメント開示は {data_years[-1]} までです (以降は開示廃止・変更)。")
+        n_show = st.slider("表示期間 (直近N期)", min(3, len(data_years)),
+                           len(data_years), min(10, len(data_years)))
+        win = data_years[-n_show:]
+        sales = all_sales[win]
+        sales = sales.loc[sales.notna().any(axis=1)]
+
+        # --- 売上構成
+        left, right = st.columns(2)
+        with left:
+            pct_mode = st.toggle("構成比 (100%積み上げ) で表示", value=False)
+            plot_df = (sales.div(sales.sum(), axis=1) * 100) if pct_mode else sales
+            fig = go.Figure()
+            for i, (name, s) in enumerate(plot_df.iterrows()):
+                fig.add_trace(go.Bar(x=win, y=s.values, name=name,
+                                     marker_color=PALETTE[i % len(PALETTE)]))
+            fig.update_layout(barmode="stack", height=460,
+                              title=f"{sales_key}の推移"
+                                    + (" (構成比%)" if pct_mode else f" ({unit_label})"),
+                              legend=dict(orientation="h", y=-0.25))
+            st.plotly_chart(fig, width="stretch")
+        with right:
+            profit = seg["items"].get("セグメント利益")
+            if profit is not None:
+                pr = sg.active_segments(profit)[win]
+                mg = pr / sales.reindex(pr.index) * 100
+                fig = go.Figure()
+                for i, (name, s) in enumerate(mg.iterrows()):
+                    fig.add_trace(go.Scatter(x=win, y=s.values, name=name,
+                                             mode="lines+markers",
+                                             line=dict(color=PALETTE[i % len(PALETTE)],
+                                                       width=3)))
+                fig.update_layout(title="セグメント利益率の推移 (対外部売上, %)",
+                                  height=460, legend=dict(orientation="h", y=-0.25))
+                st.plotly_chart(fig, width="stretch")
+
+        # --- ポートフォリオマップ
+        pmap = sg.portfolio_map(seg, win)
+        if len(pmap) >= 2:
+            st.markdown(f"##### ポートフォリオマップ (成長率は直近{n_show}期のCAGR)")
+            fig = go.Figure()
+            for i, r in pmap.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[r["CAGR(%)"]], y=[r["利益率(%)"]], mode="markers+text",
+                    text=[r["セグメント"]], textposition="top center",
+                    name=r["セグメント"],
+                    marker=dict(size=max(np.sqrt(r["売上高"]) / 25, 12),
+                                color=PALETTE[i % len(PALETTE)], opacity=0.75)))
+            fig.add_hline(y=0, line_color="#E5E7EB")
+            fig.add_vline(x=0, line_color="#E5E7EB")
+            fig.update_layout(height=480, xaxis_title="売上高CAGR (%)",
+                              yaxis_title="セグメント利益率 (%)", showlegend=False)
+            st.plotly_chart(fig, width="stretch")
+            st.caption("バブルの大きさ = 最新期の売上規模。右上ほど「成長×高収益」。")
+
+        # --- 最新期テーブル
+        st.markdown("##### 最新期の一覧")
+        latest_seg = win[-1]
+        tbl = pd.DataFrame({"売上高": sales[latest_seg]})
+        tbl["構成比(%)"] = tbl["売上高"] / tbl["売上高"].sum() * 100
+        for label, key in [("セグメント利益", "セグメント利益"), ("資産", "資産"),
+                           ("従業員数", "期末従業員数")]:
+            if key in seg["items"]:
+                tbl[label] = sg.active_segments(seg["items"][key]).get(latest_seg)
+        if "セグメント利益" in tbl.columns:
+            tbl["利益率(%)"] = tbl["セグメント利益"] / tbl["売上高"] * 100
+        if "資産" in tbl.columns and "セグメント利益" in tbl.columns:
+            tbl["セグメントROA(%)"] = tbl["セグメント利益"] / tbl["資産"] * 100
+        if "従業員数" in tbl.columns:
+            tbl["1人あたり売上高"] = tbl["売上高"] / tbl["従業員数"]
+        st.dataframe(tbl.sort_values("売上高", ascending=False).round(2),
+                     width="stretch")
+
 if page == "🎛 シミュレーション":
     st.subheader("感応度シミュレーション")
     y = st.select_slider("基準年度", years, value=latest, key="sim_year")

@@ -9,7 +9,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 
 PAGES = ["🏠 ダッシュボード", "📈 概要", "📋 財務指標", "🌳 DuPont分析",
-         "🌲 ROICツリー", "⚖️ CVP分析", "🎛 シミュレーション",
+         "🌲 ROICツリー", "⚖️ CVP分析", "🧩 セグメント", "🎛 シミュレーション",
          "🆚 複数社比較", "💰 DCF評価", "📄 レポート"]
 
 
