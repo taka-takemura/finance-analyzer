@@ -87,6 +87,31 @@ def compute_ratios(pl: pd.DataFrame, bs: pd.DataFrame, cf: pd.DataFrame,
     return out
 
 
+# ================================================================ 生産性
+def productivity(pl: pd.DataFrame, bs: pd.DataFrame,
+                 info: pd.DataFrame) -> pd.DataFrame:
+    """従業員1人あたりの効率性・生産性指標 (単位: 財務データの単位/人)。"""
+    if info.empty or "従業員数" not in info.index:
+        return pd.DataFrame()
+    emp = info.loc["従業員数"].astype(float).reindex(pl.columns)
+    if emp.dropna().empty:
+        return pd.DataFrame()
+
+    r = {}
+    r[("生産性", "従業員数(人)")] = emp
+    r[("生産性", "1人あたり売上高")] = _div(_g(pl, "売上高"), emp)
+    r[("生産性", "1人あたり営業利益")] = _div(_g(pl, "営業利益"), emp)
+    r[("生産性", "1人あたり当期純利益")] = _div(_g(pl, "当期純利益"), emp)
+    r[("生産性", "1人あたり総資産")] = _div(_g(bs, "資産合計"), emp)
+    if "人件費" in pl.index:
+        r[("生産性", "1人あたり人件費")] = _div(_g(pl, "人件費"), emp)
+        # 労働分配率 = 人件費 ÷ 付加価値(粗利で近似)
+        r[("生産性", "労働分配率(%)")] = _div(_g(pl, "人件費"), _g(pl, "売上総利益")) * 100
+    out = pd.DataFrame(r).T
+    out.index = pd.MultiIndex.from_tuples(out.index, names=["カテゴリ", "指標"])
+    return out
+
+
 # ================================================================ DuPont
 def dupont(pl: pd.DataFrame, bs: pd.DataFrame) -> pd.DataFrame:
     """ROE = 純利益率 × 総資産回転率 × 財務レバレッジ

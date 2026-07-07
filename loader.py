@@ -104,7 +104,22 @@ CF_ALIASES = {
     "フリーキャッシュフロー": ["freecashflow", "fcf", "フリーcf"],
 }
 
-ALL_ALIASES = {"PL": PL_ALIASES, "BS": BS_ALIASES, "CF": CF_ALIASES}
+# 企業データ (SPEEDA CompanyInfo 等)
+INFO_ALIASES = {
+    "従業員数": ["期末従業員数", "従業員数連結", "employees", "numberofemployees",
+                  "期末従業員数連結"],
+    "臨時従業員数": ["期末臨時従業員数", "臨時雇用者数", "平均臨時雇用人員"],
+    "発行済株式数": ["期末発行済株式数普通株自己株除く", "発行済株式総数自己株式を除く",
+                      "期末発行済株式数自己株除く", "sharesoutstanding"],
+    "1株配当": ["一株当たり年間配当金", "1株当たり年間配当金", "年間配当金", "dps",
+                 "dividendpershare"],
+    "配当総額": ["totaldividends"],
+    "EPS": ["一株当たり当期純利益", "時系列調整前eps"],
+    "BPS": ["一株当たり純資産"],
+}
+
+ALL_ALIASES = {"PL": PL_ALIASES, "BS": BS_ALIASES, "CF": CF_ALIASES,
+               "INFO": INFO_ALIASES}
 
 
 def _norm(s: str) -> str:
@@ -151,8 +166,9 @@ def _clean_frame(df: pd.DataFrame, stype: str) -> pd.DataFrame:
             vals = pd.to_numeric(
                 row.astype(str).str.replace(",", "").str.replace("△", "-")
                 .str.replace("▲", "-"), errors="coerce")
-            rows[canon] = vals
-            seen.add(canon)
+            if vals.notna().any():  # 全空行(セクション見出し等)はスキップ
+                rows[canon] = vals
+                seen.add(canon)
     out = pd.DataFrame(rows).T
     out.columns = [str(c).strip() for c in out.columns]
     # 全てNaNの列(空年度)を除去
@@ -197,6 +213,32 @@ def _parse_speeda(raw: pd.DataFrame) -> dict[str, pd.DataFrame]:
     # 年度列を全表で揃える(全表で共通して値のある列のみ残す)
     _fill_derived(result)
     return result
+
+
+def load_company_info(file) -> pd.DataFrame:
+    """SPEEDAの企業データ (CompanyInfo) ファイルから従業員数等を抽出する。
+
+    返り値: index=正規化科目 (従業員数, 発行済株式数, 1株配当 など), columns=年度。
+    """
+    xl = pd.ExcelFile(file)
+    for sheet in xl.sheet_names:
+        raw = xl.parse(sheet, header=None)
+        if raw.empty:
+            continue
+        col0 = raw.iloc[:, 0].astype(str).str.strip()
+        hdr_idx = col0[col0 == "決算期"].index
+        if len(hdr_idx) == 0:
+            continue
+        hdr = hdr_idx[0]
+        year_cells = raw.iloc[hdr, 1:]
+        year_cols = [i + 1 for i, v in enumerate(year_cells) if pd.notna(v)]
+        years = [str(raw.iloc[hdr, i]).strip() for i in year_cols]
+        block = raw.iloc[hdr + 1:, [0] + year_cols].copy()
+        block.columns = ["科目"] + years
+        info = _clean_frame(block, "INFO")
+        if not info.empty:
+            return info
+    return pd.DataFrame()
 
 
 def load_statements(file) -> dict[str, pd.DataFrame]:
